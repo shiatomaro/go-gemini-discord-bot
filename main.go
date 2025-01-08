@@ -10,6 +10,8 @@ import (
 // go get from .env file
 godotenv.Load()
 
+const prefix string = "/"
+
 func main() {
 	token := os.Getenv("BOT_TOKEN")
 	// to print if there's a token
