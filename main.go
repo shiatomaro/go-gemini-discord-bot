@@ -61,6 +61,15 @@ func main() {
 				s.ChannelMessageSend(m.ChannelID, "Please use '/ask' to use command.")
 				return
 			}
-		}
+
+		// OpenAI query
+		resp, err := openaiClient.CreateChatCompletion(openai.ChatCompletionRequest{
+			Model: openai.GPT3Dot5Turbo,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: "system", Content: "Helpful assist in questions not financial."},
+				{Role: "user", Content: "query"},
+			},
+		})
+		}),
 
 }
