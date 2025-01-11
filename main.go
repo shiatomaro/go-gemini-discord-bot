@@ -39,13 +39,28 @@ func main() {
 	// to create new discord session.
 	sess, err := discordgo.New("Bot " + token)
 	if err != nil {
-		// to create error if there's not token
+		// to create error if there's no token
 		log.fatal("No discord token found, check .env file if BOT_TOKEN is set in envirorment.", err)
 	}
 }
-
-func sess.AddHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
-	if m.Author.ID == s.State.User.ID {
+	// handle messages
+	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+		//Ignore bots own response
+		if m.Author.ID == s.State.User.ID {
 		return
 	}
+		// Command Prefix 
+		const prefix = "/ask"
+
+		// to check if the message starts with prefix 
+		if String.HasPrefix(m.Content, prefix) {
+			query := string.TrimPrefix(m.Content, prefix)
+			query := string.TrimSpace(query)
+
+			if query == "" {
+				s.ChannelMessageSend(m.ChannelID, "Please use '/ask' to use command.")
+				return
+			}
+		}
+
 }
