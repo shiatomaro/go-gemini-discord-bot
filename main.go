@@ -1,75 +1,100 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/joho/godotenv"
+	"github.com/sashabaranov/go-openai"
 )
 
-// get from .env file.
-godotenv.Load()
-
-const prefix string = "/goaskaway" // command prefix for bot.
-
+const prefix string = "!ask" // Command prefix for the bot.
 
 func main() {
-	// to load key from .env file.
+	// Load environment variables from .env file
 	err := godotenv.Load()
 	if err != nil {
-		// to check if BOT_TOKEN is set in .env file.
-		log.Fatal("OPEN_AI_KEY not set in .env file.")
+		log.Fatal("Error loading .env file")
 	}
 
-	// to get OpenAI API KEY
-	openaiKey := os.Getenv("OPENAI_API_KEY")
-	if openaiKey == "" {
-		log.Fatal("OPENAI_API_KEY is not set in the .env file.")
-	}
-
-	// initiialize OpenAI Client
-	aiClient := openai.NewClient(openaiKey)
-
-	// to load token from .env file.
+	// Retrieve the bot token
 	token := os.Getenv("BOT_TOKEN")
 	if token == "" {
-		// to check if BOT_TOKEN is set in .env file.
-		log.Println("BOT_TOKEN not set in .env file. Set BOT_TOKEN in envirorment")
+		log.Fatal("BOT_TOKEN is not set in the .env file")
+	}
 
-	// to create new discord session.
+	// Retrieve the OpenAI API key
+	openaiKey := os.Getenv("OPENAI_API_KEY")
+	if openaiKey == "" {
+		log.Fatal("OPENAI_API_KEY is not set in the .env file")
+	}
+
+	// Initialize OpenAI client
+	openaiClient := openai.NewClient(openaiKey)
+
+	// Create a new Discord session
 	sess, err := discordgo.New("Bot " + token)
 	if err != nil {
-		// to create error if there's no token
-		log.fatal("No discord token found, check .env file if BOT_TOKEN is set in envirorment.", err)
+		log.Fatalf("Error creating Discord session: %v", err)
 	}
-}
-	// handle messages
-	dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		//Ignore bots own response
-		if m.Author.ID == s.State.User.ID {
-		return
-	}
-		// Command Prefix 
-		const prefix = "/ask"
 
-		// to check if the message starts with prefix 
-		if String.HasPrefix(m.Content, prefix) {
-			query := string.TrimPrefix(m.Content, prefix)
-			query := string.TrimSpace(query)
+	// Handle messages
+	sess.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+		log.Println("Message received!") // This will log every message received
+		if m.Author.ID == s.State.User.ID {
+			return
+		}
+		// Log incoming messages to check if the bot is receiving them
+		log.Printf("Received message: %s", m.Content)
+
+		// Check if the message starts with the command prefix
+		if strings.HasPrefix(m.Content, prefix) {
+			query := strings.TrimPrefix(m.Content, prefix)
+			query = strings.TrimSpace(query)
 
 			if query == "" {
-				s.ChannelMessageSend(m.ChannelID, "Please use '/ask' to use command.")
+				s.ChannelMessageSend(m.ChannelID, "Please provide a query after the '/ask' command.")
 				return
 			}
 
-		// OpenAI query
-		resp, err := openaiClient.CreateChatCompletion(openai.ChatCompletionRequest{
-			Model: openai.GPT3Dot5Turbo,
-			Messages: []openai.ChatCompletionMessage{
-				{Role: "system", Content: "Helpful assist in questions not financial."},
-				{Role: "user", Content: "query"},
-			},
-		})
-		}),
+			// Process the query with OpenAI
+			log.Printf("Sending request to OpenAI: %+v", openai.ChatCompletionRequest{
+				Model: openai.GPT3Dot5Turbo,
+				Messages: []openai.ChatCompletionMessage{
+					{Role: "system", Content: "You are a helpful assistant."},
+					{Role: "user", Content: query},
+				},
+			})
+
+			if err != nil {
+				log.Printf("OpenAI error: %v", err)
+				s.ChannelMessageSend(m.ChannelID, "Error processing your request. Please try again later.")
+				return
+			}
+
+			// Check if a response is available
+			if len(resp.Choices) == 0 {
+				s.ChannelMessageSend(m.ChannelID, "I couldn't get a response. Please try again.")
+				return
+			}
+
+			// Send the response to Discord
+			s.ChannelMessageSend(m.ChannelID, resp.Choices[0].Message.Content)
+
+			log.Printf("Response from OpenAI: %+v", resp)
+		}
+	})
+	// Open the Discord session
+	err = sess.Open()
+	if err != nil {
+		log.Fatalf("Error opening Discord session: %v", err)
+	}
+	defer sess.Close()
+
+	fmt.Println("Bot is running. Press CTRL+C to exit.")
+	select {}
 
 }
