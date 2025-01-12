@@ -13,6 +13,24 @@ import (
 
 const prefix string = "!ask" // Command prefix for the bot.
 
+// openAI API request structure
+type OpenAIRequest struct {
+	Model    string `json:"model"`
+	Messages []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"messages"`
+}
+
+// openAI api response structure
+type OpenAIResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+}
+
 func main() {
 	// Load environment variables from .env file
 	err := godotenv.Load()
