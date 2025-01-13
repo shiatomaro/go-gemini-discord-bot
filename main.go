@@ -1,34 +1,34 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/go-resty/resty/v2"
 	"github.com/joho/godotenv"
-	"github.com/sashabaranov/go-openai"
 )
 
-const prefix string = "!ask" // Command prefix for the bot.
-
-// openAI API request structure
-type OpenAIRequest struct {
-	Model    string `json:"model"`
-	Messages []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	} `json:"messages"`
+// Gemini API request structure
+type GeminiRequest struct {
+	Contents []struct {
+		Parts []struct {
+			Text string `json:"text"`
+		} `json:"parts"`
+	} `json:"contents"`
 }
 
-// openAI api response structure
-type OpenAIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
+// Gemini API response structure
+type GeminiResponse struct {
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
 }
 
 func main() {
@@ -44,75 +44,142 @@ func main() {
 		log.Fatal("BOT_TOKEN is not set in the .env file")
 	}
 
-	// Retrieve the OpenAI API key
-	openaiKey := os.Getenv("OPENAI_API_KEY")
-	if openaiKey == "" {
-		log.Fatal("OPENAI_API_KEY is not set in the .env file")
+	// Retrieve the Gemini API key
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	if geminiKey == "" {
+		log.Fatal("GEMINI_API_KEY is not set in the .env file")
 	}
 
-	// Initialize OpenAI client
-	openaiClient := openai.NewClient(openaiKey)
-
 	// Create a new Discord session
-	sess, err := discordgo.New("Bot " + token)
+	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		log.Fatalf("Error creating Discord session: %v", err)
 	}
 
-	// Handle messages
-	sess.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		log.Println("Message received!") // This will log every message received
-		if m.Author.ID == s.State.User.ID {
-			return
-		}
-		// Log incoming messages to check if the bot is receiving them
-		log.Printf("Received message: %s", m.Content)
+	// start a discord session
+	err = dg.Open()
+	if err != nil {
+		log.Fatalf("Error in starting a discord session: %v", err)
+	}
 
-		// Check if the message starts with the command prefix
-		if strings.HasPrefix(m.Content, prefix) {
-			query := strings.TrimPrefix(m.Content, prefix)
-			query = strings.TrimSpace(query)
+	// Slash command actions
+	registerSlashCommand(dg)
 
-			if query == "" {
-				s.ChannelMessageSend(m.ChannelID, "Please provide a query after the '/ask' command.")
-				return
-			}
-
-			// Process the query with OpenAI
-			log.Printf("Sending request to OpenAI: %+v", openai.ChatCompletionRequest{
-				Model: openai.GPT3Dot5Turbo,
-				Messages: []openai.ChatCompletionMessage{
-					{Role: "system", Content: "You are a helpful assistant."},
-					{Role: "user", Content: query},
-				},
-			})
-
-			if err != nil {
-				log.Printf("OpenAI error: %v", err)
-				s.ChannelMessageSend(m.ChannelID, "Error processing your request. Please try again later.")
-				return
-			}
-
-			// Check if a response is available
-			if len(resp.Choices) == 0 {
-				s.ChannelMessageSend(m.ChannelID, "I couldn't get a response. Please try again.")
-				return
-			}
-
-			// Send the response to Discord
-			s.ChannelMessageSend(m.ChannelID, resp.Choices[0].Message.Content)
-
-			log.Printf("Response from OpenAI: %+v", resp)
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		log.Printf("Received interaction: %v", i.ApplicationCommandData().Name)
+		if i.ApplicationCommandData().Name == "ask" {
+			handleAskCommand(s, i, geminiKey)
 		}
 	})
-	// Open the Discord session
-	err = sess.Open()
-	if err != nil {
-		log.Fatalf("Error opening Discord session: %v", err)
-	}
-	defer sess.Close()
 
-	fmt.Println("Bot is running. Press CTRL+C to exit.")
+	// to close discord session
+	defer dg.Close()
+	log.Println(" Go ask away is running to exist, please press CTRL+C.")
 	select {}
 
+}
+
+// Function to call OpenAI API
+func registerSlashCommand(s *discordgo.Session) {
+	command := &discordgo.ApplicationCommand{
+		Name:        "ask",
+		Description: "go ask away any question",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Name:        "question",
+				Description: "the question for go ask away to answer",
+				Type:        discordgo.ApplicationCommandOptionString,
+				Required:    true,
+			},
+		},
+	}
+
+	_, err := s.ApplicationCommandCreate(s.State.User.ID, "", command)
+	if err != nil {
+		log.Fatalf("Error in creating a slash command: %v", err)
+	}
+	log.Println("Slash command / registered , success!")
+}
+
+func handleAskCommand(s *discordgo.Session, i *discordgo.InteractionCreate, geminiKey string) {
+	log.Println("Received /ask command interaction.")
+
+	question := i.ApplicationCommandData().Options[0].StringValue()
+	log.Printf("User's question: %s", question)
+
+	// to call gemini
+	response, err := getGeminiResponse(geminiKey, question)
+	if err != nil {
+		log.Printf("Error in connecting to gemini: %v", err)
+		// Respond to Discord indicating an error
+		err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Something went wrong.",
+			},
+		})
+		if err != nil {
+			log.Printf("Error responding to Discord with error message: %v", err)
+		}
+		return // Exit after responding with the error message
+	}
+
+	//response to the interaction
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: response,
+		},
+	})
+
+	if err != nil {
+		log.Printf("Error on response: %v", err)
+	}
+}
+
+// Function to call gemini
+func getGeminiResponse(geminiKey, userInput string) (string, error) {
+	client := resty.New()
+
+	request := GeminiRequest{
+		Contents: []struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		}{
+			{
+				Parts: []struct {
+					Text string `json:"text"`
+				}{
+					{Text: userInput},
+				},
+			},
+		},
+	}
+
+	log.Println("Sending request to Gemini API...")
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=%s", geminiKey)
+
+	resp, err := client.R().
+		SetHeader("Content-Type", "application/json").
+		SetBody(request).
+		Post(url)
+
+	if err != nil {
+		return "", err
+	}
+
+	log.Printf("Gemini API Response: %s", string(resp.Body()))
+
+	var geminiResponse GeminiResponse
+	err = json.Unmarshal(resp.Body(), &geminiResponse)
+	if err != nil {
+		return "", err
+	}
+
+	if len(geminiResponse.Candidates) > 0 && len(geminiResponse.Candidates[0].Content.Parts) > 0 {
+		return geminiResponse.Candidates[0].Content.Parts[0].Text, nil
+	}
+
+	return "No response from Gemini.", nil
 }
