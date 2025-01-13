@@ -102,38 +102,45 @@ func registerSlashCommand(s *discordgo.Session) {
 }
 
 func handleAskCommand(s *discordgo.Session, i *discordgo.InteractionCreate, geminiKey string) {
-	log.Println("Received /ask command interaction.")
+	log.Println("Handling /ask command interaction.")
 
 	question := i.ApplicationCommandData().Options[0].StringValue()
 	log.Printf("User's question: %s", question)
 
-	// to call gemini
-	response, err := getGeminiResponse(geminiKey, question)
+	// Send a deferred response to Discord
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
 	if err != nil {
-		log.Printf("Error in connecting to gemini: %v", err)
-		// Respond to Discord indicating an error
-		err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Something went wrong.",
-			},
-		})
-		if err != nil {
-			log.Printf("Error responding to Discord with error message: %v", err)
-		}
-		return // Exit after responding with the error message
+		log.Printf("Error sending preliminary response: %v", err)
+		return
 	}
 
-	//response to the interaction
-	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: response,
-		},
-	})
-
+	// Call Gemini API
+	response, err := getGeminiResponse(geminiKey, question)
 	if err != nil {
-		log.Printf("Error on response: %v", err)
+		log.Printf("Error getting response from Gemini API: %v", err)
+		// Send an error message as a follow-up
+		followUpMessage(s, i.Interaction, "Failed to get a response from Gemini API.")
+		return
+	}
+
+	// Truncate response if too long for Discord
+	if len(response) > 2000 {
+		response = response[:1997] + "..."
+	}
+
+	// Send the final response as a follow-up message
+	followUpMessage(s, i.Interaction, response)
+}
+
+// Function to send a follow-up message
+func followUpMessage(s *discordgo.Session, i *discordgo.Interaction, message string) {
+	_, err := s.FollowupMessageCreate(i, false, &discordgo.WebhookParams{
+		Content: message,
+	})
+	if err != nil {
+		log.Printf("Error sending follow-up message: %v", err)
 	}
 }
 
